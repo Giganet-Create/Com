@@ -297,7 +297,7 @@
 
         <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center">
           <button class="btn" type="submit">Enviar por WhatsApp</button>
-          <a id="callBtn" class="btn outline" href="tel:+13035003756">Llamar ahora</a>
+          <a class="btn outline" href="tel:+13035003756">Llamar ahora</a>
           <span class="muted" id="formMsg" style="display:none"></span>
         </div>
       </form>
@@ -339,46 +339,91 @@
 </footer>
 
 <script>
-/* ========= Configura tu WhatsApp =========
-   Coloca tu número en formato internacional SIN +. Ej.: 17865551234
-*/
-const WHATSAPP_NUMBER = "17865551234"; // <- CAMBIA ESTE NÚMERO
+/* ========= Configuración ========= */
+const WHATSAPP_NUMBER = "18098362943"; // <-- tu número en formato internacional SIN "+"
 const WHATSAPP_PRETEXT = "Hola, quiero contratar Giganet. Estos son mis datos:";
-const WEBHOOK_URL = "https://prod-76.westus.logic.azure.com:443/workflows/038e5b3d1e16435ca47c846cc05f9e1e/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=K0jdzBvLXBKYf7TDNdUkkshMo_bMEIj1sOCvAAJ7ebs";
-function sendToWebhook(payload){
-  try{
-    const body = JSON.stringify(payload);
-    let sent = false;
-    if (navigator.sendBeacon) {
-      const blob = new Blob([body], {type:'application/json'});
-      sent = navigator.sendBeacon(WEBHOOK_URL, blob);
-    }
-    if(!sent){
-      fetch(WEBHOOK_URL, {method:'POST', mode:'no-cors', body: body, keepalive:true}).catch(()=>{});
-    }
-  }catch(_){/* noop */}
+
+// <-- TU WEBHOOK (Logic Apps / Power Automate). Si ya tienes uno, úsalo aquí:
+const FLOW_URL = "https://prod-85.westus.logic.azure.com:443/workflows/a15e32f673dc4624b6d73ec979238804/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=VwyY5R-_TBFDEfoAupMFarmhkjQsGUB5ILXsvVZbhpI";
+
+/* ========= Utilidades de persistencia ========= */
+const LS_KEY = "giganet_form_v1";
+const FIELD_IDS = ["nombre","apellido","calle","direccion2","ciudad","estado","zip","movil","email","plan","comentario"];
+
+function readForm() {
+  const g = (id) => (document.getElementById(id)?.value || "").trim();
+  return {
+    nombre: g("nombre"),
+    apellido: g("apellido"),
+    calle: g("calle"),
+    direccion2: g("direccion2"),
+    ciudad: g("ciudad"),
+    estado: g("estado"),
+    zip: g("zip"),
+    movil: g("movil"),
+    email: g("email"),
+    plan: g("plan"),
+    comentario: g("comentario")
+  };
 }
 
-/* ====== Timer (24h) ====== */
-(function(){
-  const key='giganet_deadline_24h';
-  let end = localStorage.getItem(key);
-  if(!end){ const d=new Date(); d.setDate(d.getDate()+1); end=d.getTime(); localStorage.setItem(key,end); }
-  else end=+end;
-  const el=document.getElementById('topTimer');
-  function tick(){
-    const now=Date.now(); let diff=Math.max(0,end-now);
-    const h=Math.floor(diff/3600000); diff%=3600000;
-    const m=Math.floor(diff/60000);   diff%=60000;
-    const s=Math.floor(diff/1000);
-    const fmt=n=>String(n).padStart(2,'0');
-    el.textContent = `${fmt(h)}:${fmt(m)}:${fmt(s)}`;
-    requestAnimationFrame(()=>setTimeout(tick,250));
-  }
-  tick();
-})();
+function writeForm(data) {
+  FIELD_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName === "SELECT") {
+      Array.from(el.options).forEach(opt => { if (opt.value === (data[id] || data[id] === "" ? data[id] : opt.value)) {} });
+      el.value = data[id] ?? el.value;
+    } else {
+      el.value = data[id] ?? el.value;
+    }
+  });
+}
 
-/* ====== Form -> WhatsApp (EE. UU.) ====== */
+function saveToLS() {
+  const data = readForm();
+  localStorage.setItem(LS_KEY, JSON.stringify(data));
+}
+
+function loadFromLS() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data && typeof data === "object") writeForm(data);
+  } catch(_) {}
+}
+
+/* ========= Envío a webhook (no bloqueante) ========= */
+function sendPayload(baseData, cta){
+  const payload = {
+    ...baseData,
+    cta: cta,                           // "whatsapp" | "llamar"
+    pageTitle: document.title,
+    timestamp: new Date().toISOString()
+  };
+
+  const body = JSON.stringify(payload);
+  let sent = false;
+  try {
+    if (navigator.sendBeacon) {
+      sent = navigator.sendBeacon(FLOW_URL, body);
+    }
+  } catch (_) {}
+
+  if (!sent) {
+    try {
+      fetch(FLOW_URL, {
+        method: "POST",
+        mode: "no-cors",
+        body,
+        keepalive: true
+      }).catch(()=>{});
+    } catch (_) {}
+  }
+}
+
+/* ========= Máscaras y validaciones ========= */
 (function(){
   const f = document.getElementById('gigaForm');
   const msgEl = document.getElementById('formMsg');
@@ -387,11 +432,20 @@ function sendToWebhook(payload){
   const zipRe = /^[0-9]{5}(?:-[0-9]{4})?$/;
   const phoneRe = /^[0-9]{3}-[0-9]{3}-[0-9]{4}$/;
 
-  function val(id){ return (document.getElementById(id)?.value || "").trim(); }
   function error(txt){ msgEl.style.display='inline'; msgEl.style.color='#ffb3b3'; msgEl.textContent=txt; }
   function ok(txt){ msgEl.style.display='inline'; msgEl.style.color='#c8ffd0'; msgEl.textContent=txt; }
 
-  // ====== Input masks & live restrictions ======
+  // 1) Cargar lo guardado al iniciar
+  loadFromLS();
+
+  // 2) Guardar en localStorage en cada cambio (inputs y selects)
+  const persistTargets = f.querySelectorAll('input, select, textarea');
+  persistTargets.forEach(el=>{
+    el.addEventListener('input', saveToLS);
+    el.addEventListener('change', saveToLS);
+  });
+
+  // 3) Máscaras (igual que tenías)
   const phoneInput = document.getElementById('movil');
   if(phoneInput){
     phoneInput.addEventListener('input', ()=>{
@@ -401,6 +455,7 @@ function sendToWebhook(payload){
       if(d.length>=4){ out += '-' + d.slice(3,6); }
       if(d.length>=7){ out += '-' + d.slice(6,10); }
       phoneInput.value = out;
+      saveToLS();
     });
   }
 
@@ -409,69 +464,26 @@ function sendToWebhook(payload){
     zipInput.addEventListener('input', ()=>{
       let d = zipInput.value.replace(/[^0-9]/g,'').slice(0,9);
       zipInput.value = d.length>5 ? d.slice(0,5)+'-'+d.slice(5) : d;
+      saveToLS();
     });
   }
 
   const nombre = document.getElementById('nombre');
-  if(nombre){ nombre.addEventListener('input', ()=>{ nombre.value = nombre.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,40); }); }
+  if(nombre){ nombre.addEventListener('input', ()=>{ nombre.value = nombre.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,40); saveToLS(); }); }
   const apellido = document.getElementById('apellido');
-  if(apellido){ apellido.addEventListener('input', ()=>{ apellido.value = apellido.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,40); }); }
+  if(apellido){ apellido.addEventListener('input', ()=>{ apellido.value = apellido.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,40); saveToLS(); }); }
   const ciudad = document.getElementById('ciudad');
-  if(ciudad){ ciudad.addEventListener('input', ()=>{ ciudad.value = ciudad.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,50); }); }
-  ['calle','direccion2'].forEach((id)=>{ const el = document.getElementById(id); if(el){ el.addEventListener('input', ()=>{ el.value = el.value.replace(/[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ#.,/ -]/g,'').slice(0,80); }); }});
+  if(ciudad){ ciudad.addEventListener('input', ()=>{ ciudad.value = ciudad.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,50); saveToLS(); }); }
+  ;['calle','direccion2'].forEach((id)=>{
+    const el = document.getElementById(id);
+    if(el){ el.addEventListener('input', ()=>{ el.value = el.value.replace(/[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ#.,/ -]/g,'').slice(0,80); saveToLS(); }); }
+  });
 
-  // ====== Persistencia en localStorage ======
-  const FORM_KEY = 'giganet_form_v1';
-  function getData(){
-    return {
-      nombre: val('nombre'),
-      apellido: val('apellido'),
-      calle: val('calle'),
-      direccion2: val('direccion2'),
-      ciudad: val('ciudad'),
-      estado: val('estado'),
-      zip: val('zip'),
-      movil: val('movil'),
-      email: val('email'),
-      plan: val('plan'),
-      comentario: val('comentario')
-    };
-  }
-  function saveState(){ try{ localStorage.setItem(FORM_KEY, JSON.stringify(getData())); }catch(_){}}
-  function loadState(){
-    try{
-      const raw = localStorage.getItem(FORM_KEY);
-      if(!raw) return;
-      const saved = JSON.parse(raw)||{};
-      const set = (id,v)=>{ const el=document.getElementById(id); if(el && typeof v==='string' && v){ el.value=v; } };
-      Object.entries(saved).forEach(([k,v])=> set(k,v));
-      if(phoneInput) phoneInput.dispatchEvent(new Event('input'));
-      if(zipInput) zipInput.dispatchEvent(new Event('input'));
-    }catch(_){}
-  }
-  // Cargar estado guardado y escuchar cambios
-  loadState();
-  if(f){ f.addEventListener('input', saveState, {passive:true}); f.addEventListener('change', saveState, {passive:true}); }
-  // Webhook también al hacer click en Llamar ahora (sin bloquear)
-  const callBtn = document.getElementById('callBtn');
-  if(callBtn){ callBtn.addEventListener('click', function(){ const payload = {...getData(), source:'call_click', ts:new Date().toISOString(), path: location.pathname, userAgent: navigator.userAgent}; sendToWebhook(payload); saveState(); }, {passive:true}); }
-
+  // 4) Submit -> WhatsApp (envía a webhook y luego abre WhatsApp)
   f.addEventListener('submit', function(e){
     e.preventDefault(); msgEl.style.display='none';
 
-    const data = {
-      nombre: val('nombre'),
-      apellido: val('apellido'),
-      calle: val('calle'),
-      direccion2: val('direccion2'),
-      ciudad: val('ciudad'),
-      estado: val('estado'),
-      zip: val('zip'),
-      movil: val('movil'),
-      email: val('email'),
-      plan: val('plan'),
-      comentario: val('comentario')
-    };
+    const data = readForm();
 
     if(!data.nombre || !data.apellido) return error("Completa nombre y apellido.");
     if(!data.calle || !data.ciudad || !data.estado || !data.zip) return error("Completa tu dirección completa.");
@@ -480,9 +492,8 @@ function sendToWebhook(payload){
     if(!phoneRe.test(data.movil)) return error("Ingresa un móvil en formato 123-456-7890.");
     if(!data.plan) return error("Selecciona un plan.");
 
-    // Guardar y enviar a webhook cuando el envío a WhatsApp es válido
-    saveState();
-    sendToWebhook({...data, source:'whatsapp_submit', ts:new Date().toISOString(), path: location.pathname, userAgent: navigator.userAgent});
+    // Enviar a webhook ANTES de abrir WhatsApp
+    sendPayload(data, "whatsapp");
 
     const texto =
 `${WHATSAPP_PRETEXT}
@@ -499,12 +510,34 @@ Comentarios: ${data.comentario || "N/A"}`;
 
     const url = `https://wa.me/18098362943`;
     ok("Abriendo WhatsApp…");
-    window.open(url, "_blank", "noopener");
-  });
-})();
 
-/* Año */
-document.getElementById('year').textContent = new Date().getFullYear();
+    // Pequeño delay para dar tiempo al envío, luego abrir en nueva pestaña
+    setTimeout(()=>{
+      const a = document.createElement('a');
+      a.href = url; a.target = "_blank"; a.rel = "noopener";
+      document.body.appendChild(a); a.click(); a.remove();
+    }, 150);
+  });
+
+  // 5) Click en "Llamar ahora" (envía a webhook y luego realiza la llamada)
+  const callLink = document.querySelector('a[href^="tel:"]');
+  if (callLink) {
+    callLink.addEventListener('click', function(ev){
+      // Enviar datos actuales
+      const data = readForm();
+      sendPayload(data, "llamar");
+
+      // Dejar que la llamada ocurra (pero aseguramos navegación incluso en navegadores estrictos)
+      ev.preventDefault();
+      const href = callLink.getAttribute('href');
+      setTimeout(()=>{
+        const a = document.createElement('a');
+        a.href = href; a.rel = "noopener";
+        document.body.appendChild(a); a.click(); a.remove();
+      }, 120);
+    });
+  }
+})();
 </script>
 </body>
 </html>
