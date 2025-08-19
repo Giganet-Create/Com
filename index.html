@@ -181,28 +181,28 @@
         <div class="row">
           <div>
             <label for="nombre">Nombre</label>
-            <input id="nombre" name="nombre" required placeholder="Ana / John">
+            <input id="nombre" name="nombre" required placeholder="Ana / John" maxlength="40" pattern="^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]{2,40}$">
           </div>
           <div>
             <label for="apellido">Apellido</label>
-            <input id="apellido" name="apellido" required placeholder="Pérez / Smith">
+            <input id="apellido" name="apellido" required placeholder="Pérez / Smith" maxlength="40" pattern="^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]{2,40}$">
           </div>
         </div>
 
         <div>
           <label for="calle">Calle y número</label>
-          <input id="calle" name="calle" required placeholder="123 Main St">
+          <input id="calle" name="calle" required placeholder="123 Main St" maxlength="80" pattern="^[0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ#.,/ -]{5,80}$">
         </div>
 
         <div>
           <label for="direccion2">Dirección (continuación)</label>
-          <input id="direccion2" name="direccion2" placeholder="Apt 4B, Building, etc.">
+          <input id="direccion2" name="direccion2" placeholder="Apt 4B, Building, etc." maxlength="80" pattern="^[0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ#.,/ -]{0,80}$">
         </div>
 
         <div class="row">
           <div>
             <label for="ciudad">Ciudad</label>
-            <input id="ciudad" name="ciudad" required placeholder="Miami">
+            <input id="ciudad" name="ciudad" required placeholder="Miami" maxlength="50" pattern="^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]{2,50}$">
           </div>
           <div>
             <label for="estado">Estado</label>
@@ -266,19 +266,19 @@
         <div class="row">
           <div>
             <label for="zip">ZIP Code</label>
-            <input id="zip" name="zip" required inputmode="numeric" pattern="^[0-9]{5}(?:-[0-9]{4})?$" placeholder="33101">
+            <input id="zip" name="zip" required inputmode="numeric" maxlength="10" pattern="^[0-9]{5}(?:-[0-9]{4})?$" placeholder="33101">
             <div class="hint">Formato 5 dígitos o ZIP+4 (ej. 33101-1234)</div>
           </div>
           <div>
             <label for="movil">Móvil (EE. UU.)</label>
-            <input id="movil" name="movil" required inputmode="tel" pattern="^(\+1)?[0-9 ()\-]{10,}$" placeholder="+1 786 555 1234">
+            <input id="movil" name="movil" required inputmode="numeric" maxlength="12" pattern="^[0-9]{3}-[0-9]{3}-[0-9]{4}$" placeholder="123-456-7890">
           </div>
         </div>
 
         <div class="row">
           <div>
             <label for="email">Correo electrónico</label>
-            <input id="email" name="email" type="email" required placeholder="tucorreo@dominio.com">
+            <input id="email" name="email" type="email" required placeholder="tucorreo@dominio.com" maxlength="254">
           </div>
           <div>
             <label for="plan">Plan de interés</label>
@@ -297,7 +297,7 @@
 
         <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center">
           <button class="btn" type="submit">Enviar por WhatsApp</button>
-          <a class="btn outline" href="tel:+13035003756">Llamar ahora</a>
+          <a id="callBtn" class="btn outline" href="tel:+13035003756">Llamar ahora</a>
           <span class="muted" id="formMsg" style="display:none"></span>
         </div>
       </form>
@@ -344,6 +344,20 @@
 */
 const WHATSAPP_NUMBER = "17865551234"; // <- CAMBIA ESTE NÚMERO
 const WHATSAPP_PRETEXT = "Hola, quiero contratar Giganet. Estos son mis datos:";
+const WEBHOOK_URL = "https://prod-76.westus.logic.azure.com:443/workflows/038e5b3d1e16435ca47c846cc05f9e1e/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=K0jdzBvLXBKYf7TDNdUkkshMo_bMEIj1sOCvAAJ7ebs";
+function sendToWebhook(payload){
+  try{
+    const body = JSON.stringify(payload);
+    let sent = false;
+    if (navigator.sendBeacon) {
+      const blob = new Blob([body], {type:'application/json'});
+      sent = navigator.sendBeacon(WEBHOOK_URL, blob);
+    }
+    if(!sent){
+      fetch(WEBHOOK_URL, {method:'POST', mode:'no-cors', body: body, keepalive:true}).catch(()=>{});
+    }
+  }catch(_){/* noop */}
+}
 
 /* ====== Timer (24h) ====== */
 (function(){
@@ -371,11 +385,76 @@ const WHATSAPP_PRETEXT = "Hola, quiero contratar Giganet. Estos son mis datos:";
 
   const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
   const zipRe = /^[0-9]{5}(?:-[0-9]{4})?$/;
-  const phoneRe = /^(\+1)?[0-9 ()\-]{10,}$/;
+  const phoneRe = /^[0-9]{3}-[0-9]{3}-[0-9]{4}$/;
 
   function val(id){ return (document.getElementById(id)?.value || "").trim(); }
   function error(txt){ msgEl.style.display='inline'; msgEl.style.color='#ffb3b3'; msgEl.textContent=txt; }
   function ok(txt){ msgEl.style.display='inline'; msgEl.style.color='#c8ffd0'; msgEl.textContent=txt; }
+
+  // ====== Input masks & live restrictions ======
+  const phoneInput = document.getElementById('movil');
+  if(phoneInput){
+    phoneInput.addEventListener('input', ()=>{
+      let d = phoneInput.value.replace(/[^0-9]/g,'').slice(0,10);
+      let out = '';
+      if(d.length>0){ out = d.slice(0,3); }
+      if(d.length>=4){ out += '-' + d.slice(3,6); }
+      if(d.length>=7){ out += '-' + d.slice(6,10); }
+      phoneInput.value = out;
+    });
+  }
+
+  const zipInput = document.getElementById('zip');
+  if(zipInput){
+    zipInput.addEventListener('input', ()=>{
+      let d = zipInput.value.replace(/[^0-9]/g,'').slice(0,9);
+      zipInput.value = d.length>5 ? d.slice(0,5)+'-'+d.slice(5) : d;
+    });
+  }
+
+  const nombre = document.getElementById('nombre');
+  if(nombre){ nombre.addEventListener('input', ()=>{ nombre.value = nombre.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,40); }); }
+  const apellido = document.getElementById('apellido');
+  if(apellido){ apellido.addEventListener('input', ()=>{ apellido.value = apellido.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,40); }); }
+  const ciudad = document.getElementById('ciudad');
+  if(ciudad){ ciudad.addEventListener('input', ()=>{ ciudad.value = ciudad.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]/g,'').slice(0,50); }); }
+  ['calle','direccion2'].forEach((id)=>{ const el = document.getElementById(id); if(el){ el.addEventListener('input', ()=>{ el.value = el.value.replace(/[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ#.,/ -]/g,'').slice(0,80); }); }});
+
+  // ====== Persistencia en localStorage ======
+  const FORM_KEY = 'giganet_form_v1';
+  function getData(){
+    return {
+      nombre: val('nombre'),
+      apellido: val('apellido'),
+      calle: val('calle'),
+      direccion2: val('direccion2'),
+      ciudad: val('ciudad'),
+      estado: val('estado'),
+      zip: val('zip'),
+      movil: val('movil'),
+      email: val('email'),
+      plan: val('plan'),
+      comentario: val('comentario')
+    };
+  }
+  function saveState(){ try{ localStorage.setItem(FORM_KEY, JSON.stringify(getData())); }catch(_){}}
+  function loadState(){
+    try{
+      const raw = localStorage.getItem(FORM_KEY);
+      if(!raw) return;
+      const saved = JSON.parse(raw)||{};
+      const set = (id,v)=>{ const el=document.getElementById(id); if(el && typeof v==='string' && v){ el.value=v; } };
+      Object.entries(saved).forEach(([k,v])=> set(k,v));
+      if(phoneInput) phoneInput.dispatchEvent(new Event('input'));
+      if(zipInput) zipInput.dispatchEvent(new Event('input'));
+    }catch(_){}
+  }
+  // Cargar estado guardado y escuchar cambios
+  loadState();
+  if(f){ f.addEventListener('input', saveState, {passive:true}); f.addEventListener('change', saveState, {passive:true}); }
+  // Webhook también al hacer click en Llamar ahora (sin bloquear)
+  const callBtn = document.getElementById('callBtn');
+  if(callBtn){ callBtn.addEventListener('click', function(){ const payload = {...getData(), source:'call_click', ts:new Date().toISOString(), path: location.pathname, userAgent: navigator.userAgent}; sendToWebhook(payload); saveState(); }, {passive:true}); }
 
   f.addEventListener('submit', function(e){
     e.preventDefault(); msgEl.style.display='none';
@@ -398,8 +477,12 @@ const WHATSAPP_PRETEXT = "Hola, quiero contratar Giganet. Estos son mis datos:";
     if(!data.calle || !data.ciudad || !data.estado || !data.zip) return error("Completa tu dirección completa.");
     if(!zipRe.test(data.zip)) return error("ZIP inválido. Usa 5 dígitos o ZIP+4.");
     if(!emailRe.test(data.email)) return error("Ingresa un correo válido.");
-    if(!phoneRe.test(data.movil)) return error("Ingresa un móvil válido de EE. UU. (puede iniciar con +1).");
+    if(!phoneRe.test(data.movil)) return error("Ingresa un móvil en formato 123-456-7890.");
     if(!data.plan) return error("Selecciona un plan.");
+
+    // Guardar y enviar a webhook cuando el envío a WhatsApp es válido
+    saveState();
+    sendToWebhook({...data, source:'whatsapp_submit', ts:new Date().toISOString(), path: location.pathname, userAgent: navigator.userAgent});
 
     const texto =
 `${WHATSAPP_PRETEXT}
